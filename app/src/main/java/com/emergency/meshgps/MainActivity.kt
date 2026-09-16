@@ -96,7 +96,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendSosSignal() {
-        Toast.makeText(this, "Sinyal SOS Disebarkan via Mesh Network!", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "Sinyal SOS Disebarkan!", Toast.LENGTH_LONG).show()
         tvStatus.text = "Status: MENYEBARKAN SINYAL SOS!"
         tvStatus.setTextColor(Color.RED)
         getDeviceLocation()
