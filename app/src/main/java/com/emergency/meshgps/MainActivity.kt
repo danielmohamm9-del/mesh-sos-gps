@@ -25,7 +25,6 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var tvStatus: TextView
     private lateinit var tvLocation: TextView
-    private lateinit var tvMeshPeers: TextView
     private lateinit var btnSos: Button
 
     private val PERMISSIONS_REQUEST_CODE = 1001
@@ -52,13 +51,6 @@ class MainActivity : AppCompatActivity() {
         tvLocation = TextView(this).apply {
             text = "Lokasi GPS: Mengambil data..."
             textSize = 15f
-            setPadding(0, 0, 0, 24)
-        }
-
-        tvMeshPeers = TextView(this).apply {
-            text = "Node Terhubung: 0"
-            textSize = 14f
-            setTextColor(Color.BLUE)
             setPadding(0, 0, 0, 48)
         }
 
@@ -75,7 +67,6 @@ class MainActivity : AppCompatActivity() {
 
         layout.addView(tvStatus)
         layout.addView(tvLocation)
-        layout.addView(tvMeshPeers)
         layout.addView(btnSos)
         setContentView(layout)
 
@@ -115,7 +106,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        meshManager.startAdvertising()
+        meshManager.startAdvertising("SOS_Node")
         meshManager.startDiscovery()
     }
 
@@ -128,9 +119,8 @@ class MainActivity : AppCompatActivity() {
             tvStatus.text = "Status: MENYEBARKAN SINYAL SOS!"
             tvStatus.setTextColor(Color.RED)
 
-            // Mengirimkan payload via Nearby Mesh Connections
-            meshManager.broadcastSosSignal(lat, long)
-            Toast.makeText(this, "Paket SOS Disiarkan ke Node Terdekat!", Toast.LENGTH_SHORT).show()
+            meshManager.broadcastSosSignal(lat, long, "SOS_Node")
+            Toast.makeText(this, "Paket SOS Disiarkan via Mesh Network!", Toast.LENGTH_SHORT).show()
         }
     }
 
