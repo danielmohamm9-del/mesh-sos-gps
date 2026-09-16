@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.location.Location
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.widget.Button
@@ -20,20 +21,20 @@ import com.google.android.gms.location.LocationServices
 class MainActivity : AppCompatActivity() {
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private lateinit var meshManager: MeshNetworkManager
+
     private lateinit var tvStatus: TextView
     private lateinit var tvLocation: TextView
+    private lateinit var tvMeshPeers: TextView
     private lateinit var btnSos: Button
 
     private val PERMISSIONS_REQUEST_CODE = 1001
-    private val requiredPermissions = arrayOf(
-        Manifest.permission.ACCESS_FINE_LOCATION,
-        Manifest.permission.ACCESS_COARSE_LOCATION
-    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        meshManager = MeshNetworkManager(this)
 
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -42,15 +43,23 @@ class MainActivity : AppCompatActivity() {
         }
 
         tvStatus = TextView(this).apply {
-            text = "Status: Mesh Network Siap"
+            text = "Status: Mesh Network Standby"
             textSize = 18f
-            setPadding(0, 0, 0, 32)
+            setTextColor(Color.DKGRAY)
+            setPadding(0, 0, 0, 24)
         }
 
         tvLocation = TextView(this).apply {
-            text = "Lokasi GPS: Mencari sinyal..."
-            textSize = 16f
-            setPadding(0, 0, 0, 64)
+            text = "Lokasi GPS: Mengambil data..."
+            textSize = 15f
+            setPadding(0, 0, 0, 24)
+        }
+
+        tvMeshPeers = TextView(this).apply {
+            text = "Node Terhubung: 0"
+            textSize = 14f
+            setTextColor(Color.BLUE)
+            setPadding(0, 0, 0, 48)
         }
 
         btnSos = Button(this).apply {
@@ -60,46 +69,69 @@ class MainActivity : AppCompatActivity() {
             textSize = 18f
             setPadding(32, 32, 32, 32)
             setOnClickListener {
-                sendSosSignal()
+                triggerSosPayload()
             }
         }
 
         layout.addView(tvStatus)
         layout.addView(tvLocation)
+        layout.addView(tvMeshPeers)
         layout.addView(btnSos)
         setContentView(layout)
 
-        checkPermissions()
+        checkAndRequestPermissions()
     }
 
-    private fun checkPermissions() {
-        val missingPermissions = requiredPermissions.filter {
+    private fun checkAndRequestPermissions() {
+        val permissions = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
+            permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE)
+            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
+
+        val missing = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
 
-        if (missingPermissions.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, missingPermissions.toTypedArray(), PERMISSIONS_REQUEST_CODE)
+        if (missing.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), PERMISSIONS_REQUEST_CODE)
         } else {
-            getDeviceLocation()
+            initServices()
         }
     }
 
     @SuppressLint("MissingPermission")
-    private fun getDeviceLocation() {
-        fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
-            if (location != null) {
-                tvLocation.text = "Lokasi GPS:\nLat: ${location.latitude}\nLong: ${location.longitude}"
+    private fun initServices() {
+        fusedLocationClient.lastLocation.addOnSuccessListener { loc: Location? ->
+            if (loc != null) {
+                tvLocation.text = "Lokasi GPS:\nLat: ${loc.latitude}\nLong: ${loc.longitude}"
             } else {
-                tvLocation.text = "Lokasi GPS: Aktifkan GPS pada HP Anda"
+                tvLocation.text = "Lokasi GPS: Sinyal tidak ditemukan"
             }
         }
+
+        meshManager.startAdvertising()
+        meshManager.startDiscovery()
     }
 
-    private fun sendSosSignal() {
-        Toast.makeText(this, "Sinyal SOS Disebarkan!", Toast.LENGTH_LONG).show()
-        tvStatus.text = "Status: MENYEBARKAN SINYAL SOS!"
-        tvStatus.setTextColor(Color.RED)
-        getDeviceLocation()
+    @SuppressLint("MissingPermission")
+    private fun triggerSosPayload() {
+        fusedLocationClient.lastLocation.addOnSuccessListener { loc: Location? ->
+            val lat = loc?.latitude ?: 0.0
+            val long = loc?.longitude ?: 0.0
+            
+            tvStatus.text = "Status: MENYEBARKAN SINYAL SOS!"
+            tvStatus.setTextColor(Color.RED)
+
+            // Mengirimkan payload via Nearby Mesh Connections
+            meshManager.broadcastSosSignal(lat, long)
+            Toast.makeText(this, "Paket SOS Disiarkan ke Node Terdekat!", Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onRequestPermissionsResult(
@@ -109,7 +141,7 @@ class MainActivity : AppCompatActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == PERMISSIONS_REQUEST_CODE) {
-            getDeviceLocation()
+            initServices()
         }
     }
 }
