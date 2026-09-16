@@ -6,58 +6,55 @@ import com.google.android.gms.nearby.connection.*
 import com.google.gson.Gson
 import java.nio.charset.StandardCharsets
 
-class MeshNetworkManager(
-    private val context: Context,
-    private val onLocationReceived: (UserLocation) -> Unit
-) {
-    private val SERVICE_ID = "com.emergency.meshgps.SERVICE_ID"
-    private val connectionsClient = Nearby.getConnectionsClient(context)
+data class SosPayload(
+    val senderName: String,
+    val latitude: Double,
+    val longitude: Double,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+class MeshNetworkManager(private val context: Context) {
+
+    private val strategy = Strategy.P2P_CLUSTER
+    private val serviceId = "com.emergency.meshgps.SERVICE_ID"
     private val connectedEndpoints = mutableSetOf<String>()
     private val gson = Gson()
 
-    fun startMeshNetwork(userName: String) {
-        startAdvertising(userName)
-        startDiscovery()
+    // Fungsi dibuat public agar bisa dipanggil MainActivity
+    fun startAdvertising(userName: String = "UserNode") {
+        val advertisingOptions = AdvertisingOptions.Builder().setStrategy(strategy).build()
+        Nearby.getConnectionsClient(context)
+            .startAdvertising(userName, serviceId, connectionLifecycleCallback, advertisingOptions)
     }
 
-    private fun startAdvertising(userName: String) {
-        val options = AdvertisingOptions.Builder()
-            .setStrategy(Strategy.P2P_CLUSTER)
-            .build()
-
-        connectionsClient.startAdvertising(
-            userName,
-            SERVICE_ID,
-            connectionLifecycleCallback,
-            options
-        )
+    fun startDiscovery() {
+        val discoveryOptions = DiscoveryOptions.Builder().setStrategy(strategy).build()
+        Nearby.getConnectionsClient(context)
+            .startDiscovery(serviceId, endpointDiscoveryCallback, discoveryOptions)
     }
 
-    private fun startDiscovery() {
-        val options = DiscoveryOptions.Builder()
-            .setStrategy(Strategy.P2P_CLUSTER)
-            .build()
+    fun broadcastSosSignal(latitude: Double, longitude: Double, senderName: String = "UserNode") {
+        val sosData = SosPayload(senderName, latitude, longitude)
+        val jsonString = gson.toJson(sosData)
+        val payload = Payload.fromBytes(jsonString.toByteArray(StandardCharsets.UTF_8))
 
-        connectionsClient.startDiscovery(
-            SERVICE_ID,
-            endpointDiscoveryCallback,
-            options
-        )
+        for (endpointId in connectedEndpoints) {
+            Nearby.getConnectionsClient(context).sendPayload(endpointId, payload)
+        }
     }
 
     private val endpointDiscoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
-            connectionsClient.requestConnection("NODE", endpointId, connectionLifecycleCallback)
+            Nearby.getConnectionsClient(context)
+                .requestConnection("UserNode", endpointId, connectionLifecycleCallback)
         }
 
-        override fun onEndpointLost(endpointId: String) {
-            connectedEndpoints.remove(endpointId)
-        }
+        override fun onEndpointLost(endpointId: String) {}
     }
 
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
-        override fun onConnectionInitiated(endpointId: String, connectionInfo: ConnectionInfo) {
-            connectionsClient.acceptConnection(endpointId, payloadCallback)
+        override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
+            Nearby.getConnectionsClient(context).acceptConnection(endpointId, payloadCallback)
         }
 
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
@@ -73,31 +70,9 @@ class MeshNetworkManager(
 
     private val payloadCallback = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
-            if (payload.type == Payload.Type.BYTES) {
-                val bytes = payload.asBytes() ?: return
-                val jsonStr = String(bytes, StandardCharsets.UTF_8)
-                try {
-                    val location = gson.fromJson(jsonStr, UserLocation::class.java)
-                    onLocationReceived(location)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
+            // Tempat menerima pesan SOS dari node mesh lain
         }
 
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {}
-    }
-
-    fun broadcastLocation(location: UserLocation) {
-        if (connectedEndpoints.isEmpty()) return
-        val jsonStr = gson.toJson(location)
-        val payload = Payload.fromBytes(jsonStr.toByteArray(StandardCharsets.UTF_8))
-        connectionsClient.sendPayload(connectedEndpoints.toList(), payload)
-    }
-
-    fun stopMesh() {
-        connectionsClient.stopAdvertising()
-        connectionsClient.stopDiscovery()
-        connectionsClient.stopAllEndpoints()
     }
 }
