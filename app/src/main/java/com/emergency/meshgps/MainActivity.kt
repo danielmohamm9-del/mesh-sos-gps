@@ -40,9 +40,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Inisialisasi Konfigurasi OSMdroid
         Configuration.getInstance().load(this, PreferenceManager.getDefaultSharedPreferences(this))
-
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
         val layout = LinearLayout(this).apply {
@@ -51,13 +49,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         tvStatus = TextView(this).apply {
-            text = "Status: Mesh Network Standby"
-            textSize = 16f
+            text = "Status: Memeriksa Izin Perangkat..."
+            textSize = 15f
             setTextColor(Color.DKGRAY)
             setPadding(0, 0, 0, 16)
         }
 
-        // Komponen Peta Interaktif
         mapView = MapView(this).apply {
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
@@ -84,7 +81,6 @@ class MainActivity : AppCompatActivity() {
         layout.addView(btnSos)
         setContentView(layout)
 
-        // Inisialisasi Mesh Manager dengan callback update peta saat sinyal SOS diterima
         meshManager = MeshNetworkManager(this) { sender, lat, lng ->
             showSosOnMap(sender, lat, lng)
         }
@@ -117,6 +113,9 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("MissingPermission")
     private fun initServices() {
+        tvStatus.text = "Status: Mesh Network Standby & Mencari Node..."
+        tvStatus.setTextColor(Color.BLUE)
+
         fusedLocationClient.lastLocation.addOnSuccessListener { loc: Location? ->
             if (loc != null) {
                 val myPoint = GeoPoint(loc.latitude, loc.longitude)
@@ -133,25 +132,40 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        meshManager.startAdvertising("SOS_Node")
+        meshManager.startAdvertising("Node_${Build.MODEL}")
         meshManager.startDiscovery()
     }
 
     @SuppressLint("MissingPermission")
     private fun triggerSosPayload() {
+        btnSos.isEnabled = false
+        btnSos.text = "MENGIRIM SINYAL..."
+        tvStatus.text = "Status: MENYEBARKAN SINYAL SOS!"
+        tvStatus.setTextColor(Color.RED)
+
         fusedLocationClient.lastLocation.addOnSuccessListener { loc: Location? ->
-            val lat = loc?.latitude ?: 0.0
-            val long = loc?.longitude ?: 0.0
+            btnSos.isEnabled = true
+            btnSos.text = "KIRIM SOS (SINYAL DARURAT)"
 
-            tvStatus.text = "Status: MENYEBARKAN SINYAL SOS!"
-            tvStatus.setTextColor(Color.RED)
+            if (loc != null) {
+                val lat = loc.latitude
+                val long = loc.longitude
 
-            meshManager.broadcastSosSignal(lat, long, "SOS_Node")
-            Toast.makeText(this, "Sinyal SOS Disiarkan!", Toast.LENGTH_SHORT).show()
+                meshManager.broadcastSosSignal(lat, long, "Node_${Build.MODEL}")
+
+                val myPoint = GeoPoint(lat, long)
+                mapView.controller.animateTo(myPoint)
+                Toast.makeText(this, "Memicu SOS pada Lat: $lat, Lng: $long", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "⚠️ Gagal mengambil lokasi GPS. Pastikan GPS aktif!", Toast.LENGTH_LONG).show()
+            }
+        }.addOnFailureListener { e ->
+            btnSos.isEnabled = true
+            btnSos.text = "KIRIM SOS (SINYAL DARURAT)"
+            Toast.makeText(this, "Error GPS: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
         }
     }
 
-    // Menampilkan titik penanda SOS Merah di peta penerima
     private fun showSosOnMap(sender: String, lat: Double, lng: Double) {
         runOnUiThread {
             val sosPoint = GeoPoint(lat, lng)
@@ -166,13 +180,24 @@ class MainActivity : AppCompatActivity() {
             sosMarker?.snippet = "Lat: $lat, Lng: $lng"
             sosMarker?.showInfoWindow()
 
-            // Fokuskan peta ke posisi korban SOS
             mapView.controller.animateTo(sosPoint)
             mapView.controller.setZoom(18.0)
             mapView.invalidate()
 
             tvStatus.text = "🚨 SINYAL SOS DITERIMA DARI: $sender"
             tvStatus.setTextColor(Color.RED)
+            Toast.makeText(this, "🚨 KORBAN TERMUDI DI PETA!", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == PERMISSIONS_REQUEST_CODE) {
+            initServices()
         }
     }
 
