@@ -80,7 +80,6 @@ class MeshNetworkManager(
                 val jsonString = String(bytes, StandardCharsets.UTF_8)
                 try {
                     val sosData = gson.fromJson(jsonString, SosPayload::class.java)
-                    // Mengirimkan koordinat ke MainActivity untuk ditampilkan di peta
                     onSosReceived(sosData.senderName, sosData.latitude, sosData.longitude)
                 } catch (e: Exception) {
                     showToast("Pesan Diterima: $jsonString")
