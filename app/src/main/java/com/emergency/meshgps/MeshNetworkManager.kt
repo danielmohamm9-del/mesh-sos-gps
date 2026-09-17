@@ -1,6 +1,9 @@
 package com.emergency.meshgps
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.*
 import com.google.gson.Gson
@@ -13,14 +16,16 @@ data class SosPayload(
     val timestamp: Long = System.currentTimeMillis()
 )
 
-class MeshNetworkManager(private val context: Context) {
+class MeshNetworkManager(
+    private val context: Context,
+    private val onSosReceived: (sender: String, lat: Double, lng: Double) -> Unit
+) {
 
     private val strategy = Strategy.P2P_CLUSTER
     private val serviceId = "com.emergency.meshgps.SERVICE_ID"
     private val connectedEndpoints = mutableSetOf<String>()
     private val gson = Gson()
 
-    // Fungsi dibuat public agar bisa dipanggil MainActivity
     fun startAdvertising(userName: String = "UserNode") {
         val advertisingOptions = AdvertisingOptions.Builder().setStrategy(strategy).build()
         Nearby.getConnectionsClient(context)
@@ -70,9 +75,25 @@ class MeshNetworkManager(private val context: Context) {
 
     private val payloadCallback = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
-            // Tempat menerima pesan SOS dari node mesh lain
+            val bytes = payload.asBytes()
+            if (bytes != null) {
+                val jsonString = String(bytes, StandardCharsets.UTF_8)
+                try {
+                    val sosData = gson.fromJson(jsonString, SosPayload::class.java)
+                    // Mengirimkan koordinat ke MainActivity untuk ditampilkan di peta
+                    onSosReceived(sosData.senderName, sosData.latitude, sosData.longitude)
+                } catch (e: Exception) {
+                    showToast("Pesan Diterima: $jsonString")
+                }
+            }
         }
 
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {}
+    }
+
+    private fun showToast(msg: String) {
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        }
     }
 }
