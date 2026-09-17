@@ -7,7 +7,7 @@ import android.graphics.Color
 import android.location.Location
 import android.os.Build
 import android.os.Bundle
-import android.view.Gravity
+import android.preference.PreferenceManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -17,6 +17,11 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 
 class MainActivity : AppCompatActivity() {
 
@@ -24,34 +29,43 @@ class MainActivity : AppCompatActivity() {
     private lateinit var meshManager: MeshNetworkManager
 
     private lateinit var tvStatus: TextView
-    private lateinit var tvLocation: TextView
+    private lateinit var mapView: MapView
     private lateinit var btnSos: Button
+
+    private var myMarker: Marker? = null
+    private var sosMarker: Marker? = null
 
     private val PERMISSIONS_REQUEST_CODE = 1001
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Inisialisasi Konfigurasi OSMdroid
+        Configuration.getInstance().load(this, PreferenceManager.getDefaultSharedPreferences(this))
+
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        meshManager = MeshNetworkManager(this)
 
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(64, 64, 64, 64)
-            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(16, 16, 16, 16)
         }
 
         tvStatus = TextView(this).apply {
             text = "Status: Mesh Network Standby"
-            textSize = 18f
+            textSize = 16f
             setTextColor(Color.DKGRAY)
-            setPadding(0, 0, 0, 24)
+            setPadding(0, 0, 0, 16)
         }
 
-        tvLocation = TextView(this).apply {
-            text = "Lokasi GPS: Mengambil data..."
-            textSize = 15f
-            setPadding(0, 0, 0, 48)
+        // Komponen Peta Interaktif
+        mapView = MapView(this).apply {
+            setTileSource(TileSourceFactory.MAPNIK)
+            setMultiTouchControls(true)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
         }
 
         btnSos = Button(this).apply {
@@ -59,16 +73,21 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(Color.RED)
             setTextColor(Color.WHITE)
             textSize = 18f
-            setPadding(32, 32, 32, 32)
+            setPadding(16, 24, 16, 24)
             setOnClickListener {
                 triggerSosPayload()
             }
         }
 
         layout.addView(tvStatus)
-        layout.addView(tvLocation)
+        layout.addView(mapView)
         layout.addView(btnSos)
         setContentView(layout)
+
+        // Inisialisasi Mesh Manager dengan callback update peta saat sinyal SOS diterima
+        meshManager = MeshNetworkManager(this) { sender, lat, lng ->
+            showSosOnMap(sender, lat, lng)
+        }
 
         checkAndRequestPermissions()
     }
@@ -100,9 +119,17 @@ class MainActivity : AppCompatActivity() {
     private fun initServices() {
         fusedLocationClient.lastLocation.addOnSuccessListener { loc: Location? ->
             if (loc != null) {
-                tvLocation.text = "Lokasi GPS:\nLat: ${loc.latitude}\nLong: ${loc.longitude}"
-            } else {
-                tvLocation.text = "Lokasi GPS: Sinyal tidak ditemukan"
+                val myPoint = GeoPoint(loc.latitude, loc.longitude)
+                mapView.controller.setZoom(17.0)
+                mapView.controller.setCenter(myPoint)
+
+                if (myMarker == null) {
+                    myMarker = Marker(mapView)
+                    myMarker?.title = "Lokasi Saya"
+                    mapView.overlays.add(myMarker)
+                }
+                myMarker?.position = myPoint
+                mapView.invalidate()
             }
         }
 
@@ -115,23 +142,47 @@ class MainActivity : AppCompatActivity() {
         fusedLocationClient.lastLocation.addOnSuccessListener { loc: Location? ->
             val lat = loc?.latitude ?: 0.0
             val long = loc?.longitude ?: 0.0
-            
+
             tvStatus.text = "Status: MENYEBARKAN SINYAL SOS!"
             tvStatus.setTextColor(Color.RED)
 
             meshManager.broadcastSosSignal(lat, long, "SOS_Node")
-            Toast.makeText(this, "Paket SOS Disiarkan via Mesh Network!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Sinyal SOS Disiarkan!", Toast.LENGTH_SHORT).show()
         }
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == PERMISSIONS_REQUEST_CODE) {
-            initServices()
+    // Menampilkan titik penanda SOS Merah di peta penerima
+    private fun showSosOnMap(sender: String, lat: Double, lng: Double) {
+        runOnUiThread {
+            val sosPoint = GeoPoint(lat, lng)
+
+            if (sosMarker == null) {
+                sosMarker = Marker(mapView)
+                mapView.overlays.add(sosMarker)
+            }
+
+            sosMarker?.position = sosPoint
+            sosMarker?.title = "🚨 BAHAYA SOS: $sender"
+            sosMarker?.snippet = "Lat: $lat, Lng: $lng"
+            sosMarker?.showInfoWindow()
+
+            // Fokuskan peta ke posisi korban SOS
+            mapView.controller.animateTo(sosPoint)
+            mapView.controller.setZoom(18.0)
+            mapView.invalidate()
+
+            tvStatus.text = "🚨 SINYAL SOS DITERIMA DARI: $sender"
+            tvStatus.setTextColor(Color.RED)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        mapView.onResume()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        mapView.onPause()
     }
 }
