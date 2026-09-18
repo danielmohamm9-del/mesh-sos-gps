@@ -1,5 +1,7 @@
 package com.emergency.meshgps
 
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
 import android.content.Context
 import android.os.Build
 import android.os.Handler
@@ -9,6 +11,7 @@ import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.*
 import com.google.gson.Gson
 import java.nio.charset.StandardCharsets
+import java.util.UUID
 
 data class SosPayload(
     val senderName: String,
@@ -31,24 +34,12 @@ class MeshNetworkManager(
         val advertisingOptions = AdvertisingOptions.Builder().setStrategy(strategy).build()
         Nearby.getConnectionsClient(context)
             .startAdvertising(userName, serviceId, connectionLifecycleCallback, advertisingOptions)
-            .addOnSuccessListener {
-                showToast("Advertising Aktif: Menunggu perangkat terdekat...")
-            }
-            .addOnFailureListener { e ->
-                showToast("Gagal Advertising: ${e.localizedMessage}")
-            }
     }
 
     fun startDiscovery() {
         val discoveryOptions = DiscoveryOptions.Builder().setStrategy(strategy).build()
         Nearby.getConnectionsClient(context)
             .startDiscovery(serviceId, endpointDiscoveryCallback, discoveryOptions)
-            .addOnSuccessListener {
-                showToast("Discovery Aktif: Mencari node mesh...")
-            }
-            .addOnFailureListener { e ->
-                showToast("Gagal Discovery: ${e.localizedMessage}")
-            }
     }
 
     fun broadcastSosSignal(latitude: Double, longitude: Double, senderName: String = "Node_${Build.MODEL}") {
@@ -56,52 +47,62 @@ class MeshNetworkManager(
         val jsonString = gson.toJson(sosData)
         val payload = Payload.fromBytes(jsonString.toByteArray(StandardCharsets.UTF_8))
 
-        if (connectedEndpoints.isEmpty()) {
-            showToast("⚠️ Belum terhubung ke node lain! Mengulangi pencarian...")
-            startDiscovery()
-            startAdvertising(senderName)
-            return
+        // 1. Kirim ke Perangkat Mesh Lainnya (HP ke HP)
+        for (endpointId in connectedEndpoints) {
+            Nearby.getConnectionsClient(context).sendPayload(endpointId, payload)
         }
 
-        for (endpointId in connectedEndpoints) {
-            Nearby.getConnectionsClient(context)
-                .sendPayload(endpointId, payload)
-                .addOnSuccessListener {
-                    showToast("✅ SOS Terkirim ke: $endpointId")
+        // 2. Kirim Langsung ke Laptop Posko via Bluetooth RFCOMM jika ada
+        sendSosToLaptop(latitude, longitude)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun sendSosToLaptop(latitude: Double, longitude: Double) {
+        Thread {
+            try {
+                val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
+                val pairedDevices = bluetoothAdapter?.bondedDevices
+
+                pairedDevices?.forEach { device ->
+                    try {
+                        val uuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB") // Serial Port Profile
+                        val socket = device.createRfcommSocketToServiceRecord(uuid)
+                        socket.connect()
+
+                        val sosData = SosPayload("Node_${Build.MODEL}", latitude, longitude)
+                        val jsonString = gson.toJson(sosData)
+
+                        socket.outputStream.write(jsonString.toByteArray(StandardCharsets.UTF_8))
+                        socket.outputStream.flush()
+                        socket.close()
+                        showToast("✅ Terkirim ke Laptop Posko (${device.name})")
+                    } catch (_: Exception) {
+                        // Perangkat bukan server posko, lanjut ke perangkat berikutnya
+                    }
                 }
-                .addOnFailureListener { e ->
-                    showToast("❌ Gagal Kirim SOS ke $endpointId: ${e.localizedMessage}")
-                }
-        }
+            } catch (e: Exception) {
+                showToast("⚠️ Transmisi Laptop: ${e.localizedMessage}")
+            }
+        }.start()
     }
 
     private val endpointDiscoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
-            showToast("Node Ditemukan: ${info.endpointName}. Meringkas koneksi...")
             Nearby.getConnectionsClient(context)
                 .requestConnection("Node_${Build.MODEL}", endpointId, connectionLifecycleCallback)
         }
-
-        override fun onEndpointLost(endpointId: String) {
-            showToast("Koneksi Node Terputus: $endpointId")
-        }
+        override fun onEndpointLost(endpointId: String) {}
     }
 
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
             Nearby.getConnectionsClient(context).acceptConnection(endpointId, payloadCallback)
         }
-
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
-            if (result.status.isSuccess) {
-                connectedEndpoints.add(endpointId)
-                showToast("🤝 MESH TERHUBUNG DENGAN: $endpointId")
-            }
+            if (result.status.isSuccess) connectedEndpoints.add(endpointId)
         }
-
         override fun onDisconnected(endpointId: String) {
             connectedEndpoints.remove(endpointId)
-            showToast("Terputus dari Node: $endpointId")
         }
     }
 
@@ -113,12 +114,9 @@ class MeshNetworkManager(
                 try {
                     val sosData = gson.fromJson(jsonString, SosPayload::class.java)
                     onSosReceived(sosData.senderName, sosData.latitude, sosData.longitude)
-                } catch (e: Exception) {
-                    showToast("Pesan Mentah Diterima: $jsonString")
-                }
+                } catch (_: Exception) {}
             }
         }
-
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {}
     }
 
