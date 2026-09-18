@@ -49,7 +49,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         tvStatus = TextView(this).apply {
-            text = "Status: Memeriksa Izin Perangkat..."
+            text = "Status: Memeriksa Izin..."
             textSize = 15f
             setTextColor(Color.DKGRAY)
             setPadding(0, 0, 0, 16)
@@ -59,9 +59,7 @@ class MainActivity : AppCompatActivity() {
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
             layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
             )
         }
 
@@ -71,9 +69,7 @@ class MainActivity : AppCompatActivity() {
             setTextColor(Color.WHITE)
             textSize = 18f
             setPadding(16, 24, 16, 24)
-            setOnClickListener {
-                triggerSosPayload()
-            }
+            setOnClickListener { triggerSosPayload() }
         }
 
         layout.addView(tvStatus)
@@ -113,7 +109,7 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("MissingPermission")
     private fun initServices() {
-        tvStatus.text = "Status: Mesh Network Standby & Mencari Node..."
+        tvStatus.text = "Status: Mesh Network Aktif"
         tvStatus.setTextColor(Color.BLUE)
 
         fusedLocationClient.lastLocation.addOnSuccessListener { loc: Location? ->
@@ -148,21 +144,16 @@ class MainActivity : AppCompatActivity() {
             btnSos.text = "KIRIM SOS (SINYAL DARURAT)"
 
             if (loc != null) {
-                val lat = loc.latitude
-                val long = loc.longitude
-
-                meshManager.broadcastSosSignal(lat, long, "Node_${Build.MODEL}")
-
-                val myPoint = GeoPoint(lat, long)
+                meshManager.broadcastSosSignal(loc.latitude, loc.longitude, "Node_${Build.MODEL}")
+                val myPoint = GeoPoint(loc.latitude, loc.longitude)
                 mapView.controller.animateTo(myPoint)
-                Toast.makeText(this, "Memicu SOS pada Lat: $lat, Lng: $long", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Sinyal SOS Disiarkan!", Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(this, "⚠️ Gagal mengambil lokasi GPS. Pastikan GPS aktif!", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "⚠️ Gagal mengambil posisi GPS!", Toast.LENGTH_LONG).show()
             }
-        }.addOnFailureListener { e ->
+        }.addOnFailureListener {
             btnSos.isEnabled = true
             btnSos.text = "KIRIM SOS (SINYAL DARURAT)"
-            Toast.makeText(this, "Error GPS: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -184,30 +175,16 @@ class MainActivity : AppCompatActivity() {
             mapView.controller.setZoom(18.0)
             mapView.invalidate()
 
-            tvStatus.text = "🚨 SINYAL SOS DITERIMA DARI: $sender"
+            tvStatus.text = "🚨 SOS DITERIMA: $sender"
             tvStatus.setTextColor(Color.RED)
-            Toast.makeText(this, "🚨 KORBAN TERMUDI DI PETA!", Toast.LENGTH_LONG).show()
         }
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == PERMISSIONS_REQUEST_CODE) {
-            initServices()
-        }
+        if (requestCode == PERMISSIONS_REQUEST_CODE) initServices()
     }
 
-    override fun onResume() {
-        super.onResume()
-        mapView.onResume()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        mapView.onPause()
-    }
+    override fun onResume() { super.onResume(); mapView.onResume() }
+    override fun onPause() { super.onPause(); mapView.onPause() }
 }
